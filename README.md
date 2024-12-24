@@ -2,7 +2,7 @@
     <img width="256" heigth="256" src="img/logo.png">
     <h1 align="center">SignTools</h1>
     <p align="center">
-        A free, self-hosted, cross-platform service to sign and install iOS apps, all <b>without a computer</b>.
+        A free, self-hosted platform to sign and install iOS apps without a computer
     </p>
     <p align="center">
         <img alt="GitHub" src="https://img.shields.io/github/license/signtools/SignTools">
@@ -16,34 +16,26 @@
 
 ## Introduction
 
-There are countless reasons to install apps outside Apple's App Store. Unfortunately, this process is severely hindered and out of reach for most people. Here SignTools comes to the rescue. No more terminal, half-working scripts, or even computer. Sideload any app directly from your phone through a simple web interface.
-
-What's the catch? The workflow uses a separate macOS machine, called a "builder", to perform the signing. This project is only a web service which controls the builder, along with a web interface for you to upload unsigned apps and download signed apps. However, **you don't need to own a Mac** - the builder can be any **free** CI (Continuous Integration) provider or even your own machine. The web service can also be hosted on any **free** server or one of your own.
-
-More information and examples can be found in the installation section.
-
-## :raised_hands: Community
-
-Come join the official Discord to get more interactive support and have general conversations about this project: https://discord.gg/A4T6npnRCk
+SignTools is a sideloading platform that takes a different approach from any similar tools. It consists of two components — a **service** and a **builder**. The builder is a macOS machine which performs signing using official Apple software. Doing so means high reliability and compatibility. The service (this repo) can be hosted anywhere, and it provides a web interface for you to upload, sign, and download apps, using the builder where necessary. Having the web service means that you don't need anything installed on your phone, and you can still sideload without a computer.
 
 ## Disclaimer
 
-This project is self-hosted; there is no public service. It does not provide any alternative catalog of apps. This project does not provide, promote, or support any form of piracy. This project is aimed solely at people who want to install homebrew apps on their device, much like the popular [AltStore](https://github.com/rileytestut/AltStore). We (all collaborators) cannot be held liable for anything that happens by you using this project.
+This project is self-hosted and does not constitute a public service. It does not offer any alternative catalog of applications, nor does it endorse or support any form of piracy. The sole purpose of this project is to enable users to use homebrew apps or tweaks on their devices.
+
+By using this project, you acknowledge and agree that the developers and collaborators cannot be held responsible for any damages, losses, or consequences incurred as a result of your use of this project. Please exercise caution and ensure that you comply with all applicable laws and regulations when using this project.
 
 ## Features
 
 - No jailbreak required
-- iOS, iPadOS, macOS (M1) supported
-- No computer required after an initial setup \*
+- iOS, iPadOS, macOS (native + IPA) supported
+- No computer required after an initial setup
 - Minimalistic, mobile-friendly web interface
 - Upload unsigned apps, download signed apps
 - Inject tweaks as you are signing apps
-- Install signed apps from the website straight to your iOS device via [OTA](https://medium.com/@adrianstanecki/distributing-and-installing-non-market-ipa-application-over-the-air-ota-2e65f5ea4a46) \*
-- Provisioning profiles, paid and free developer accounts supported
-- Every possible signing method supported, including entitlements \*
+- Install signed apps from the website straight to your iOS device via [OTA](https://medium.com/@adrianstanecki/distributing-and-installing-non-market-ipa-application-over-the-air-ota-2e65f5ea4a46)
+- Provisioning profiles and developer accounts supported
+- Configurable signing including entitlements
 - Choose from multiple signing profiles for each app
-
-\* Free developer accounts require a computer to install apps and some entitlements will not work. Check out the [FAQ](FAQ.md).
 
 ## Screenshots
 
@@ -56,13 +48,7 @@ This project is self-hosted; there is no public service. It does not provide any
 </tr>
 </table>
 
-## Installation
-
-There are multiple ways to install this web service:
-
-- ### [Simple](INSTALL-SIMPLE.md) - on a free Heroku server
-
-- ### [Advanced](INSTALL-ADVANCED.md) - on your own machine
+## [Installation](INSTALL.md)
 
 ## [Frequently Asked Questions (FAQ)](FAQ.md)
 

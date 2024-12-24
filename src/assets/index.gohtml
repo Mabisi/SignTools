@@ -6,14 +6,14 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/css/bootstrap.min.css"
       rel="stylesheet"
-      integrity="sha384-+0n0xVW2eSR5OomGNYDnhzAbDsOXxcvSN1TPprVMTNDbiYZCxYbOOl7+AMvyTG2x"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css"
+      integrity="sha256-YvdLHPgkqJ8DVUxjjnGVlMMJtNimJ6dYkowFFvp4kKs="
       crossorigin="anonymous"
     />
     <script
-      src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/js/bootstrap.bundle.min.js"
-      integrity="sha384-gtEjrD/SeCtmISkJkNUaaKMoLD0//ElJ19smozuHV6z3Iehds+3Ulb9Bn9Plx0x4"
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha256-9SEPo+fwJFpMUet/KACSwO+Z/dKMReF9q4zFhU/fT9M="
       crossorigin="anonymous"
     ></script>
     <script
@@ -23,19 +23,19 @@
     ></script>
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.5.0/font/bootstrap-icons.css"
-      integrity="sha256-PDJQdTN7dolQWDASIoBVrjkuOEaI137FI15sqI3Oxu8="
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css"
+      integrity="sha256-rzXMaro05QBd53CZ36ctTBp3FdKN3Ow0P0gDHcjLCLw="
       crossorigin="anonymous"
     />
     <script
-      src="https://cdn.jsdelivr.net/npm/uppy@2.2.3/dist/uppy.min.js"
-      integrity="sha256-I3+pb8CYXtWPkSAzCIvFXcAC7QqudjN5QX/V3Vk+W5k="
+      src="https://cdn.jsdelivr.net/npm/uppy@2.9.3/dist/uppy.min.js"
+      integrity="sha256-AwzInV10JlTyQ3D+cm8UeCggCK6dujyU4Gmy4MCDTFo="
       crossorigin="anonymous"
     ></script>
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/uppy@2.2.3/dist/uppy.min.css"
-      integrity="sha256-qktWqXWHPbgvZKtOIdBjJy1TMTjRZ9V3LWiUOCt2jSQ="
+      href="https://cdn.jsdelivr.net/npm/uppy@2.9.3/dist/uppy.min.css"
+      integrity="sha256-1GDsETbuTbdWsQXcmt8zRLSsQhnVCZAAfPpCdKuiDi8="
       crossorigin="anonymous"
     />
     <style>
@@ -97,9 +97,24 @@
               <div class="tab-content" id="nav-tabContent">
                 <div class="tab-pane active pt-2" id="nav-main" role="tabpanel">
                   <div class="mb-2">
-                    <label class="form-label">App file</label>
+                    <div class="d-flex justify-content-between">
+                      <label class="form-label">App file</label>
+                      <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="formFileUseUrl" />
+                        <label class="form-check-label" for="formFileUseUrl">URL</label>
+                      </div>
+                    </div>
                     <input class="form-control" type="file" id="formFileSelect" required />
                     <input class="form-control" type="text" id="formFileText" hidden disabled />
+                    <input
+                      class="form-control"
+                      type="text"
+                      id="formFileUrl"
+                      placeholder="https://git.io/myapp.ipa"
+                      name="{{.FormFileUrl}}"
+                      hidden
+                      required
+                    />
                     <input
                       class="form-control"
                       type="text"
@@ -255,7 +270,7 @@
                         style="color: blue"
                         data-bs-toggle="tooltip"
                         data-bs-placement="right"
-                        title="Fixes push notifications. Requires distribution certificate. Breaks all entitlements."
+                        title="Fixes push notifications. Requires distribution certificate. Can break entitlements."
                         >?</a
                       >
                     </div>
@@ -406,11 +421,7 @@
               </p>
               <div class="d-flex flex-wrap justify-content-end">
                 {{if eq $app.Status 1 }}
-                <a
-                  class="btn btn-outline-light mt-2 ms-2"
-                  href="itms-services://?action=download-manifest&url={{$app.ManifestUrl}}"
-                  >Install</a
-                >
+                <a class="btn btn-outline-light mt-2 ms-2" href="{{$app.InstallUrl}}">Install</a>
                 {{end}} {{if ne $app.Status 1 }}
                 <a
                   class="btn btn-outline-light mt-2 ms-2 {{if lt (len $app.WorkflowUrl) 1}}disabled{{end}}"
@@ -447,6 +458,8 @@
     const formFileSelect = document.getElementById("formFileSelect");
     const formFileId = document.getElementById("formFileId");
     const formFileText = document.getElementById("formFileText");
+    const formFileUseUrl = document.getElementById("formFileUseUrl");
+    const formFileUrl = document.getElementById("formFileUrl");
     const formTweakIds = document.getElementById("formTweakIds");
     const formTweaksSelect = document.getElementById("formTweaksSelect");
     const formSubmit = document.getElementById("formSubmit");
@@ -489,7 +502,7 @@
     });
     uppy.use(Uppy.Tus, {
       endpoint: "/tus/",
-      parallelUploads: 4,
+      parallelUploads: 6,
     });
 
     function addTusFileHook(formItem, uploadType) {
@@ -527,20 +540,26 @@
       item.addEventListener("click", function () {
         formFileId.value = item.getAttribute("x-app-id");
         formFileText.hidden = false;
-        formFileText.required = true;
         formFileText.value = item.getAttribute("x-app-name");
         formFileSelect.hidden = true;
-        formFileSelect.required = false;
+        formFileSelect.disabled = true;
+        formFileUrl.hidden = true;
+        formFileUrl.disabled = true;
+        formFileUseUrl.disabled = true;
+        formFileUseUrl.checked = false;
         modal.show();
       });
     }
     btnUploadApp.addEventListener("click", function () {
       formFileId.value = "";
       formFileText.hidden = true;
-      formFileText.required = false;
       formFileText.value = "";
       formFileSelect.hidden = false;
-      formFileSelect.required = true;
+      formFileSelect.disabled = false;
+      formFileUrl.hidden = true;
+      formFileUrl.disabled = true;
+      formFileUseUrl.disabled = false;
+      formFileUseUrl.checked = false;
       modal.show();
     });
     btnModalClose.addEventListener("click", function () {
@@ -585,6 +604,12 @@
       });
     });
 
+    formFileUseUrl.addEventListener("change", function () {
+      formFileSelect.hidden = !formFileSelect.hidden;
+      formFileSelect.disabled = !formFileSelect.disabled;
+      formFileUrl.hidden = !formFileUrl.hidden;
+      formFileUrl.disabled = !formFileUrl.disabled;
+    });
     formProfile.addEventListener("change", function () {
       const selectedOption = formProfile.options[formProfile.selectedIndex];
       if (selectedOption.getAttribute("account") === "true") {
@@ -669,6 +694,11 @@
       if (e.target === chkAutoRefresh || e.target === lblAutoRefresh) {
         return;
       }
+      chkAutoRefresh.checked = false;
+      localStorage.removeItem("autoRefresh");
+      checkAutoRefresh();
+    });
+    document.addEventListener("keydown", function (e) {
       chkAutoRefresh.checked = false;
       localStorage.removeItem("autoRefresh");
       checkAutoRefresh();

@@ -25,7 +25,6 @@ import (
 	"io"
 	log3 "log"
 	"mime"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,6 +38,7 @@ import (
 
 var formNames = assets.FormNames{
 	FormFileId:          "file_id",
+	FormFileUrl:         "file_url",
 	FormTweakIds:        "tweak_ids",
 	FormProfileId:       "profile_id",
 	FormBuilderId:       "builder_id",
@@ -62,9 +62,9 @@ func main() {
 	host := flag.String("host", "", "Listen host, empty for all")
 	port := flag.Uint64("port", 8080, "Listen port")
 	configFile := flag.String("config", "signer-cfg.yml", "Configuration file")
-	ngrokPort := flag.Uint64("ngrok-port", 0, "Ngrok web interface port. "+
+	ngrokHost := flag.String("ngrok-host", "", "Ngrok web interface host. "+
 		"Used to automatically parse the server_url")
-	cloudflaredPort := flag.Uint64("cloudflared-port", 0, "cloudflared metrics port. "+
+	cloudflaredHost := flag.String("cloudflared-host", "", "cloudflared metrics host. "+
 		"Used to automatically parse the server_url")
 	logJson := flag.Bool("log-json", false, "If enabled, outputs logs in JSON instead of pretty printing them.")
 	logLevel := flag.Uint("log-level", uint(zerolog.InfoLevel), "Logging level, 0 (debug) - 5 (panic).")
@@ -78,10 +78,10 @@ func main() {
 	config.Load(*configFile)
 	storage.Load()
 	switch {
-	case *ngrokPort != 0:
-		config.Current.ServerUrl = getPublicUrlFatal(&tunnel.Ngrok{Port: *ngrokPort, Proto: "https"})
-	case *cloudflaredPort != 0:
-		config.Current.ServerUrl = getPublicUrlFatal(&tunnel.Cloudflare{Port: *cloudflaredPort})
+	case *ngrokHost != "":
+		config.Current.ServerUrl = getPublicUrlFatal(&tunnel.Ngrok{Host: *ngrokHost, Proto: "https"})
+	case *cloudflaredHost != "":
+		config.Current.ServerUrl = getPublicUrlFatal(&tunnel.Cloudflare{Host: *cloudflaredHost})
 	}
 
 	log.Info().Str("url", config.Current.ServerUrl).Msg("using server url")
@@ -147,9 +147,10 @@ func serve(host string, port uint64) {
 	e.GET("/", renderIndex, basicAuth)
 	e.GET("/favicon.png", getFavIcon, basicAuth)
 	e.POST("/apps", uploadUnsignedApp, basicAuth)
-	e.GET("/apps/:id/signed", appResolver(getSignedApp))
-	e.GET("/apps/:id/tweaks", appResolver(getTweaks))
-	e.GET("/apps/:id/unsigned", appResolver(getUnsignedApp))
+	getAndHead(e, "/apps/:id/signed", appResolver(getSignedApp), appResolver(getSignedApp))
+	getAndHead(e, "/apps/:id/tweaks", appResolver(getTweaks), appResolver(getEmpty200App))
+	getAndHead(e, "/apps/:id/unsigned", appResolver(getUnsignedApp), appResolver(getUnsignedApp))
+	e.GET("/apps/:id/install", appResolver(renderInstall))
 	e.GET("/apps/:id/manifest", appResolver(getManifest))
 	e.GET("/apps/:id/resign", appResolver(resignApp), basicAuth)
 	e.GET("/apps/:id/delete", appResolver(deleteApp), basicAuth)
@@ -157,9 +158,10 @@ func serve(host string, port uint64) {
 	e.POST("/apps/:id/rename", appResolver(renameApp), basicAuth)
 	e.GET("/apps/:id/2fa", appResolver(render2FAPage), basicAuth)
 	e.POST("/apps/:id/2fa", appResolver(set2FA), basicAuth)
-	e.GET("/jobs", getLastJob, workflowKeyAuth)
+	getAndHead(e, "/jobs", getLastJob, getEmpty200, workflowKeyAuth)
 	e.GET("/jobs/:id/2fa", jobResolver(get2FA), workflowKeyAuth)
 	e.POST("/jobs/:id/signed", jobResolver(uploadSignedApp), workflowKeyAuth)
+	getAndHead(e, "/jobs/:id/unsigned", jobResolver(getUnsignedAppJob), jobResolver(getUnsignedAppJob), workflowKeyAuth)
 	e.GET("/jobs/:id/fail", jobResolver(failJob), workflowKeyAuth)
 
 	if err := addTusHandlers(e, map[string]echo.MiddlewareFunc{
@@ -170,6 +172,69 @@ func serve(host string, port uint64) {
 	}
 
 	log.Fatal().Err(e.Start(fmt.Sprintf("%s:%d", host, port))).Send()
+}
+
+func getAndHead(e *echo.Echo, path string, getHandler func(c echo.Context) error, headHandler func(c echo.Context) error, m ...echo.MiddlewareFunc) {
+	e.GET(path, getHandler, m...)
+	e.HEAD(path, headHandler, m...)
+}
+
+func renderInstall(c echo.Context, app storage.App) error {
+	usingManifestProxy := false
+	baseUrl := getBaseUrl(c)
+	manifestUrl := ""
+	var err error
+	if strings.HasPrefix(baseUrl, "https") {
+		// must be a full URL
+		manifestUrl, err = util.JoinUrls(baseUrl, "/apps", app.GetId(), "manifest")
+		if err != nil {
+			return errors.WithMessage(err, "build manifest url")
+		}
+	} else {
+		usingManifestProxy = true
+		downloadFullUrl, err := util.JoinUrls(baseUrl, "/apps", app.GetId(), "signed")
+		if err != nil {
+			return errors.WithMessage(err, "build download url")
+		}
+		proxyUrl := url.URL{
+			Scheme: "https",
+			Host:   "ota.signtools.workers.dev",
+			Path:   "/v1",
+		}
+		name, err := app.GetString(storage.AppName)
+		if err != nil {
+			logErrApp(err, app).Msg("get name")
+		}
+		bundleId, _ := app.GetString(storage.AppBundleId)
+
+		query := url.Values{
+			"ipa":   []string{downloadFullUrl},
+			"title": []string{name},
+			"id":    []string{bundleId},
+		}
+		proxyUrl.RawQuery = query.Encode()
+		manifestUrl = proxyUrl.String()
+	}
+	if usingManifestProxy {
+		log.Warn().Str("base_url", getBaseUrl(c)).Msg("using OTA manifest proxy, installation may not work")
+	}
+	appName, err := app.GetString(storage.AppName)
+	if err != nil {
+		return err
+	}
+	data := assets.InstallData{
+		ManifestUrl: manifestUrl,
+		AppName:     appName,
+	}
+	t, err := htmlTemplate.New("").Parse(assets.InstallHtml)
+	if err != nil {
+		return err
+	}
+	var result bytes.Buffer
+	if err := t.Execute(&result, data); err != nil {
+		return err
+	}
+	return c.HTMLBlob(200, result.Bytes())
 }
 
 type LogToZeroLog struct {
@@ -193,6 +258,7 @@ func addTusHandlers(e *echo.Echo, uploadEndpoints map[string]echo.MiddlewareFunc
 		BasePath:              "/files/",
 		StoreComposer:         composer,
 		NotifyCompleteUploads: true,
+		UseRelativeUrls:       true,
 		Logger:                logger,
 	})
 	//TODO: Apply tus middleware
@@ -405,9 +471,15 @@ func getManifest(c echo.Context, app storage.App) error {
 }
 
 func getBaseUrl(c echo.Context) string {
+	var host = ""
+	if value := c.Request().Header.Get("X-Forwarded-Host"); value != "" {
+		host = value
+	} else {
+		host = c.Request().Host
+	}
 	serverUrl := url.URL{
 		Scheme: c.Scheme(),
-		Host:   c.Request().Host,
+		Host:   host,
 	}
 	return serverUrl.String()
 }
@@ -465,6 +537,30 @@ func getSignedApp(c echo.Context, app storage.App) error {
 	return nil
 }
 
+func getEmpty200(c echo.Context) error {
+	return c.NoContent(200)
+}
+
+func getEmpty200App(c echo.Context, app storage.App) error {
+	return c.NoContent(200)
+}
+
+func getUnsignedAppJob(c echo.Context, job *storage.ReturnJob) error {
+	app, ok := storage.Apps.Get(job.AppId)
+	if !ok {
+		return c.NoContent(404)
+	}
+	file, err := app.GetFile(storage.AppUnsignedFile)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err := writeFileResponse(c, file, app); err != nil {
+		return err
+	}
+	return nil
+}
+
 func getUnsignedApp(c echo.Context, app storage.App) error {
 	file, err := app.GetFile(storage.AppUnsignedFile)
 	if err != nil {
@@ -504,10 +600,19 @@ func uploadUnsignedApp(c echo.Context) error {
 		return errors.New("no builder with id " + builderId)
 	}
 
-	var file multipart.File
+	var file io.ReadCloser
 	var fileName string
 	fileId := c.FormValue(formNames.FormFileId)
-	if app, ok := storage.Apps.Get(fileId); ok {
+	fileUrl := c.FormValue(formNames.FormFileUrl)
+	if fileUrl != "" {
+		resp, err := http.Get(fileUrl)
+		if err != nil || resp.StatusCode < 200 || resp.StatusCode > 299 {
+			return c.String(400, "Failed to download app from url: "+err.Error())
+		}
+		file = resp.Body
+		defer file.Close()
+		fileName = filepath.Base(fileUrl)
+	} else if app, ok := storage.Apps.Get(fileId); ok {
 		readonlyFile, err := app.GetFile(storage.AppUnsignedFile)
 		if err != nil {
 			return err
@@ -569,7 +674,7 @@ func uploadUnsignedApp(c echo.Context) error {
 		fileName = fmt.Sprintf("%s (%s)%s",
 			strings.TrimSuffix(fileName, filepath.Ext(fileName)), bundleName, filepath.Ext(fileName))
 	}
-	tweakMap := map[string]io.ReadSeeker{}
+	tweakMap := map[string]io.Reader{}
 	tweakIds := c.FormValue(formNames.FormTweakIds)
 	if tweakIds != "" {
 		for _, tweakId := range strings.Split(tweakIds, ",") {
@@ -660,7 +765,6 @@ func renderIndex(c echo.Context) error {
 	data := assets.IndexData{
 		FormNames: formNames,
 	}
-	usingManifestProxy := false
 	for _, app := range apps {
 		isSigned, err := app.IsSigned()
 		if err != nil {
@@ -704,33 +808,6 @@ func renderIndex(c echo.Context) error {
 		} else {
 			status = assets.AppStatusFailed
 		}
-		baseUrl := getBaseUrl(c)
-		manifestUrl := ""
-		if strings.HasPrefix(baseUrl, "https") {
-			// must be a full URL
-			manifestUrl, err = util.JoinUrls(baseUrl, "/apps", app.GetId(), "manifest")
-			if err != nil {
-				return errors.WithMessage(err, "build manifest url")
-			}
-		} else {
-			usingManifestProxy = true
-			downloadFullUrl, err := util.JoinUrls(baseUrl, "/apps", app.GetId(), "signed")
-			if err != nil {
-				return errors.WithMessage(err, "build download url")
-			}
-			proxyUrl := url.URL{
-				Scheme: "https",
-				Host:   "ota.signtools.workers.dev",
-				Path:   "/v1",
-			}
-			query := url.Values{
-				"ipa":   []string{downloadFullUrl},
-				"title": []string{name},
-				"id":    []string{bundleId},
-			}
-			proxyUrl.RawQuery = query.Encode()
-			manifestUrl = proxyUrl.String()
-		}
 
 		tweakCount := 0
 		if tweaks, err := app.ReadDir(storage.TweaksDir); err == nil {
@@ -747,7 +824,7 @@ func renderIndex(c echo.Context) error {
 			WorkflowUrl:         workflowUrl,
 			ProfileName:         profileName,
 			BundleId:            bundleId,
-			ManifestUrl:         manifestUrl,
+			InstallUrl:          path.Join("/apps", app.GetId(), "install"),
 			DownloadSignedUrl:   path.Join("/apps", app.GetId(), "signed"),
 			DownloadUnsignedUrl: path.Join("/apps", app.GetId(), "unsigned"),
 			DownloadTweaksUrl:   path.Join("/apps", app.GetId(), "tweaks"),
@@ -757,9 +834,6 @@ func renderIndex(c echo.Context) error {
 			RenameUrl:           path.Join("/apps", app.GetId(), "rename"),
 			TweakCount:          tweakCount,
 		})
-	}
-	if usingManifestProxy {
-		log.Warn().Str("base_url", getBaseUrl(c)).Msg("using OTA manifest proxy, installation may not work")
 	}
 	profiles, err := storage.Profiles.GetAll()
 	if err != nil {

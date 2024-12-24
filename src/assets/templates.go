@@ -6,7 +6,7 @@ type App struct {
 	Name                string
 	ModTime             string
 	WorkflowUrl         string
-	ManifestUrl         string
+	InstallUrl          string
 	DownloadSignedUrl   string
 	DownloadUnsignedUrl string
 	DownloadTweaksUrl   string
@@ -39,6 +39,7 @@ type Builder struct {
 
 type FormNames struct {
 	FormFileId          string
+	FormFileUrl         string
 	FormTweakIds        string
 	FormProfileId       string
 	FormBuilderId       string
@@ -73,4 +74,9 @@ type ManifestData struct {
 
 type RenameData struct {
 	AppName string
+}
+
+type InstallData struct {
+	ManifestUrl string
+	AppName     string
 }
